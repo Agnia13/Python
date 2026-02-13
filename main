@@ -1,0 +1,433 @@
+import json
+import os
+from abc import ABC, abstractmethod
+from typing import Dict, List, Optional
+
+
+class Storage(ABC):
+    @abstractmethod
+    def load(self):
+        pass
+
+    @abstractmethod
+    def save(self, data):
+        pass
+
+
+class Book:
+    def __init__(self, title: str, author: str, book_id: int):
+        self.__id = book_id
+        self.__title = title
+        self.__author = author
+        self.__status = "доступна"
+
+    def get_id(self) -> int:
+        return self.__id
+
+    def get_title(self) -> str:
+        return self.__title
+
+    def get_author(self) -> str:
+        return self.__author
+
+    def get_status(self) -> str:
+        return self.__status
+
+    def set_status(self, status: str):
+        if status in ["доступна", "выдана"]:
+            self.__status = status
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.__id,
+            "title": self.__title,
+            "author": self.__author,
+            "status": self.__status
+        }
+
+    @staticmethod
+    def from_dict(data: Dict) -> 'Book':
+        book = Book(data["title"], data["author"], data["id"])
+        book.set_status(data["status"])
+        return book
+
+
+class Person(ABC):
+    def __init__(self, name: str, user_id: int):
+        self.__name = name
+        self.__id = user_id
+
+    def get_name(self) -> str:
+        return self.__name
+
+    def get_id(self) -> int:
+        return self.__id
+
+    @abstractmethod
+    def get_role(self) -> str:
+        pass
+
+
+class User(Person):
+    def __init__(self, name: str, user_id: int):
+        super().__init__(name, user_id)
+        self.__borrowed_books = []
+
+    def get_role(self) -> str:
+        return "user"
+
+    def borrow_book(self, book: Book):
+        if book.get_status() == "доступна":
+            self.__borrowed_books.append(book.get_id())
+            book.set_status("выдана")
+            return True
+        return False
+
+    def return_book(self, book: Book):
+        if book.get_id() in self.__borrowed_books:
+            self.__borrowed_books.remove(book.get_id())
+            book.set_status("доступна")
+            return True
+        return False
+
+    def get_borrowed_books(self) -> List[int]:
+        return self.__borrowed_books.copy()
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.get_id(),
+            "name": self.get_name(),
+            "borrowed_books": self.__borrowed_books
+        }
+
+    @staticmethod
+    def from_dict(data: Dict) -> 'User':
+        user = User(data["name"], data["id"])
+        user.__borrowed_books = data["borrowed_books"]
+        return user
+
+
+class Librarian(Person):
+    def __init__(self, name: str, user_id: int):
+        super().__init__(name, user_id)
+
+    def get_role(self) -> str:
+        return "librarian"
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.get_id(),
+            "name": self.get_name()
+        }
+
+    @staticmethod
+    def from_dict(data: Dict) -> 'Librarian':
+        return Librarian(data["name"], data["id"])
+
+
+class BookStorage(Storage):
+    def __init__(self, filename: str = "books.txt"):
+        self.filename = filename
+
+    def load(self) -> List[Book]:
+        books = []
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    books = [Book.from_dict(book_data) for book_data in data]
+            except (json.JSONDecodeError, FileNotFoundError):
+                pass
+        return books
+
+    def save(self, books: List[Book]):
+        with open(self.filename, 'w', encoding='utf-8') as f:
+            data = [book.to_dict() for book in books]
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+class UserStorage(Storage):
+    def __init__(self, filename: str = "users.txt"):
+        self.filename = filename
+
+    def load(self) -> List[User]:
+        users = []
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    users = [User.from_dict(user_data) for user_data in data]
+            except (json.JSONDecodeError, FileNotFoundError):
+                pass
+        return users
+
+    def save(self, users: List[User]):
+        with open(self.filename, 'w', encoding='utf-8') as f:
+            data = [user.to_dict() for user in users]
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+class LibrarianStorage(Storage):
+    def __init__(self, filename: str = "librarians.txt"):
+        self.filename = filename
+
+    def load(self) -> List[Librarian]:
+        librarians = []
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    librarians = [Librarian.from_dict(lib_data) for lib_data in data]
+            except (json.JSONDecodeError, FileNotFoundError):
+                pass
+        return librarians
+
+    def save(self, librarians: List[Librarian]):
+        with open(self.filename, 'w', encoding='utf-8') as f:
+            data = [lib.to_dict() for lib in librarians]
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+class Library:
+    def __init__(self):
+        self.book_storage = BookStorage()
+        self.user_storage = UserStorage()
+        self.librarian_storage = LibrarianStorage()
+
+        self.books = self.book_storage.load()
+        self.users = self.user_storage.load()
+        self.librarians = self.librarian_storage.load()
+
+        if not self.librarians:
+            self.librarians.append(Librarian("Администратор", 1))
+
+    def save_all(self):
+        self.book_storage.save(self.books)
+        self.user_storage.save(self.users)
+        self.librarian_storage.save(self.librarians)
+
+    # Методы для библиотекаря
+    def add_book(self, title: str, author: str) -> Book:
+        book_id = max([book.get_id() for book in self.books], default=0) + 1
+        book = Book(title, author, book_id)
+        self.books.append(book)
+        return book
+
+    def remove_book(self, book_id: int) -> bool:
+        for i, book in enumerate(self.books):
+            if book.get_id() == book_id:
+                del self.books[i]
+                return True
+        return False
+
+    def register_user(self, name: str) -> User:
+        user_id = max([user.get_id() for user in self.users], default=0) + 1
+        user = User(name, user_id)
+        self.users.append(user)
+        return user
+
+    def get_all_users(self) -> List[User]:
+        return self.users.copy()
+
+    def get_all_books(self) -> List[Book]:
+        return self.books.copy()
+
+    # Методы для пользователя
+    def get_available_books(self) -> List[Book]:
+        return [book for book in self.books if book.get_status() == "доступна"]
+
+    def borrow_book(self, user_id: int, book_id: int) -> bool:
+        user = self.__find_user(user_id)
+        book = self.__find_book(book_id)
+
+        if user and book:
+            return user.borrow_book(book)
+        return False
+
+    def return_book(self, user_id: int, book_id: int) -> bool:
+        user = self.__find_user(user_id)
+        book = self.__find_book(book_id)
+
+        if user and book:
+            return user.return_book(book)
+        return False
+
+    def get_user_books(self, user_id: int) -> List[Book]:
+        user = self.__find_user(user_id)
+        if user:
+            borrowed_ids = user.get_borrowed_books()
+            return [book for book in self.books if book.get_id() in borrowed_ids]
+        return []
+
+    # Вспомогательные методы
+    def __find_user(self, user_id: int) -> Optional[User]:
+        for user in self.users:
+            if user.get_id() == user_id:
+                return user
+        return None
+
+    def __find_book(self, book_id: int) -> Optional[Book]:
+        for book in self.books:
+            if book.get_id() == book_id:
+                return book
+        return None
+
+    def authenticate(self, name: str, role: str) -> Optional[Person]:
+        if role == "librarian":
+            for lib in self.librarians:
+                if lib.get_name() == name:
+                    return lib
+        else:
+            for user in self.users:
+                if user.get_name() == name:
+                    return user
+        return None
+
+
+class ConsoleInterface:
+    def __init__(self):
+        self.library = Library()
+        self.current_user = None
+
+    def run(self):
+        print("Добро пожаловать в библиотеку")
+
+        while True:
+            if not self.current_user:
+                self.login_menu()
+            else:
+                if isinstance(self.current_user, Librarian):
+                    self.librarian_menu()
+                else:
+                    self.user_menu()
+
+    def login_menu(self):
+        print("\nВход в систему")
+        print("1. Войти как библиотекарь")
+        print("2. Войти как пользователь")
+        print("3. Выйти")
+
+        choice = input("Выберите действие: ")
+
+        if choice == "1":
+            name = input("Введите имя библиотекаря: ")
+            user = self.library.authenticate(name, "librarian")
+            if user:
+                self.current_user = user
+                print(f"Добро пожаловать, {user.get_name()}!")
+            else:
+                print("Библиотекарь не найден!")
+
+        elif choice == "2":
+            name = input("Введите имя пользователя: ")
+            user = self.library.authenticate(name, "user")
+            if user:
+                self.current_user = user
+                print(f"Добро пожаловать, {user.get_name()}!")
+            else:
+                print("Пользователь не найден!")
+                create = input("Хотите зарегистрироваться? (да/нет): ")
+                if create.lower() == "да":
+                    user = self.library.register_user(name)
+                    self.current_user = user
+                    print(f"Пользователь {name} успешно зарегистрирован!")
+
+        elif choice == "3":
+            self.library.save_all()
+            print("Данные сохранены. До свидания!")
+            exit()
+
+    def librarian_menu(self):
+        print("\nМеню библиотекаря")
+        print("1. Добавить новую книгу")
+        print("2. Удалить книгу")
+        print("3. Зарегистрировать нового пользователя")
+        print("4. Просмотреть список всех пользователей")
+        print("5. Просмотреть список всех книг")
+        print("6. Выйти из аккаунта")
+
+        choice = input("Выберите действие: ")
+
+        if choice == "1":
+            title = input("Введите название книги: ")
+            author = input("Введите автора книги: ")
+            book = self.library.add_book(title, author)
+            print(f"Книга '{title}' успешно добавлена с ID {book.get_id()}")
+
+        elif choice == "2":
+            book_id = int(input("Введите ID книги для удаления: "))
+            if self.library.remove_book(book_id):
+                print("Книга успешно удалена!")
+            else:
+                print("Книга с таким ID не найдена!")
+
+        elif choice == "3":
+            name = input("Введите имя нового пользователя: ")
+            user = self.library.register_user(name)
+            print(f"Пользователь '{name}' успешно зарегистрирован с ID {user.get_id()}")
+
+        elif choice == "4":
+            users = self.library.get_all_users()
+            print("\nСписок пользователей:")
+            for user in users:
+                print(f"ID: {user.get_id()}, Имя: {user.get_name()}")
+
+        elif choice == "5":
+            books = self.library.get_all_books()
+            print("\nСписок всех книг:")
+            for book in books:
+                print(f"ID: {book.get_id()}, Название: {book.get_title()}, "
+                      f"Автор: {book.get_author()}, Статус: {book.get_status()}")
+
+        elif choice == "6":
+            self.current_user = None
+            print("Выход из аккаунта...")
+
+    def user_menu(self):
+        print(f"\nМеню пользователя ({self.current_user.get_name()})")
+        print("1. Просмотреть доступные книги")
+        print("2. Взять книгу")
+        print("3. Вернуть книгу")
+        print("4. Просмотреть список взятых книг")
+        print("5. Выйти из аккаунта")
+
+        choice = input("Выберите действие: ")
+
+        if choice == "1":
+            books = self.library.get_available_books()
+            print("\nДоступные книги:")
+            for book in books:
+                print(f"ID: {book.get_id()}, Название: {book.get_title()}, Автор: {book.get_author()}")
+
+        elif choice == "2":
+            book_id = int(input("Введите ID книги, которую хотите взять: "))
+            if self.library.borrow_book(self.current_user.get_id(), book_id):
+                print("Книга успешно взята!")
+            else:
+                print("Не удалось взять книгу. Возможно, она уже выдана или не существует.")
+
+        elif choice == "3":
+            book_id = int(input("Введите ID книги для возврата: "))
+            if self.library.return_book(self.current_user.get_id(), book_id):
+                print("Книга успешно возвращена!")
+            else:
+                print("Не удалось вернуть книгу. Проверьте ID книги.")
+
+        elif choice == "4":
+            books = self.library.get_user_books(self.current_user.get_id())
+            print("\nВаши книги:")
+            if books:
+                for book in books:
+                    print(f"ID: {book.get_id()}, Название: {book.get_title()}, Автор: {book.get_author()}")
+            else:
+                print("У вас нет книг.")
+
+        elif choice == "5":
+            self.current_user = None
+            print("Выход из аккаунта...")
+
+
+if __name__ == "__main__":
+    app = ConsoleInterface()
+    app.run()
+    
